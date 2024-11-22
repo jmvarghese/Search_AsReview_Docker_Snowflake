@@ -1,0 +1,7 @@
+# Ignore specific files
+my_asreview_image.tar
+nginx_image.tar
+
+# Ignore all .tar files
+*.tar
+*.tar
