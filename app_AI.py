@@ -39,20 +39,21 @@ Entrez.email = "your_email@example.com"
 # Create an unverified SSL context
 ssl_context = ssl._create_unverified_context()
 
-# Create a custom HTTPS handler that ignores SSL certificate errors
 class HTTPSHandlerIgnoreSSL(urllib.request.HTTPSHandler):
-	def __init__(self, context=None, check_hostname=None):
-		super().__init__(context=context)
-		self.check_hostname = check_hostname
-
-	def https_open(self, req):
-		return self.do_open(self.getConnection, req)
-
-	def getConnection(self, host, **kwargs):
-		return http.client.HTTPSConnection(host, context=ssl_context, **kwargs)
+	def __init__(self, context=None):
+		# Create an unverified context if none is provided.
+		if context is None:
+			context = ssl._create_unverified_context()
+		# Call the parent constructor and pass check_hostname=False.
+		super().__init__(context=context, check_hostname=False)
+		# Explicitly set the attributes to be safe.
+		self._context = context
+		self._check_hostname = False
 
 # Patch Entrez to use the custom handler
 def patched_urlopen(request):
+	url = request.get_full_url() if hasattr(request, "get_full_url") else str(request)
+	print("Attempting to open URL:", url)
 	opener = urllib.request.build_opener(HTTPSHandlerIgnoreSSL(context=ssl_context))
 	return opener.open(request)
 
