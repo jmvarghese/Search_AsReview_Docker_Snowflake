@@ -1,0 +1,115 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+	<meta charset="UTF-8">
+	<meta name="viewport" content="width=device-width, initial-scale=1.0">
+	<title>PubMed Search</title>
+	<link href="https://stackpath.bootstrapcdn.com/bootstrap/4.5.2/css/bootstrap.min.css" rel="stylesheet">
+	<style>
+		body {
+			padding: 20px;
+		}
+		.search-term {
+			display: flex;
+			align-items: center;
+			margin-bottom: 10px;
+		}
+		.search-term label {
+			flex: 1;
+		}
+		.search-term input, .search-term select, .search-term button {
+			flex: 2;
+			margin-left: 5px;
+		}
+		#query-box {
+			margin-top: 20px;
+		}
+	</style>
+</head>
+<body>
+	<div class="container">
+		<h1 class="mb-4">PubMed Search</h1>
+		<form method="post" action="{{ url_for('search') }}">
+			<div id="search-terms">
+				<div class="form-group search-term">
+					<label for="query1">Enter search term:</label>
+					<input type="text" class="form-control" id="query1" name="queries[]" oninput="updateQuery()" required>
+					<select class="form-control" name="operators[]" onchange="updateQuery()">
+						<option value="--">--</option>
+						<option value="AND">AND</option>
+						<option value="OR">OR</option>
+						<option value="NOT">NOT</option>
+					</select>
+				</div>
+			</div>
+			<button type="button" class="btn btn-secondary" onclick="addSearchTerm()">Add Another Term</button>
+			<button type="submit" class="btn btn-primary">Search</button>
+
+			<h2 class="mt-4">Query box</h2>
+			<textarea id="query-box" class="form-control" rows="4" name="query" required></textarea>
+		</form>
+	</div>
+
+	<script>
+		function addSearchTerm() {
+			const div = document.createElement('div');
+			div.className = 'form-group search-term';
+			div.innerHTML = `
+				<label for="query">Enter search term:</label>
+				<input type="text" class="form-control" name="queries[]" oninput="updateQuery()" required>
+				<select class="form-control" name="operators[]" onchange="updateQuery()">
+					<option value="--">--</option>
+					<option value="AND">AND</option>
+					<option value="OR">OR</option>
+					<option value="NOT">NOT</option>
+				</select>
+				<button type="button" class="btn btn-danger" onclick="removeSearchTerm(this)">Remove</button>
+			`;
+			document.getElementById('search-terms').appendChild(div);
+			updateQuery();
+		}
+
+		function removeSearchTerm(button) {
+			button.parentElement.remove();
+			updateQuery();
+		}
+
+		function updateQuery() {
+			const queries = document.getElementsByName('queries[]');
+			const operators = document.getElementsByName('operators[]');
+			let queryStr = '';
+			let currentGroup = [];
+			let groupedQuery = '';
+
+			for (let i = 0; i < queries.length; i++) {
+				const term = `(${queries[i].value})`;
+				const operator = operators[i]?.value || '';
+
+				if (operator === 'OR') {
+					currentGroup.push(term);
+				} else {
+					if (currentGroup.length > 0) {
+						currentGroup.push(term);
+						groupedQuery += `(${currentGroup.join(' OR ')}) ${operator}`;
+						currentGroup = [];
+					} else {
+						groupedQuery += `${term} ${operator}`;
+					}
+				}
+
+				if (operator === 'NOT') {
+					groupedQuery = groupedQuery.replace(` ${operator}`, `) ${operator}`);
+					groupedQuery = `(${groupedQuery}`;
+				}
+			}
+
+			if (currentGroup.length > 0) {
+				groupedQuery += `(${currentGroup.join(' OR ')})`;
+			}
+
+			queryStr = groupedQuery.trim().replace(/(AND|OR|NOT|--)\s*$/, '').trim();
+			document.getElementById('query-box').value = queryStr;
+		}
+	</script>
+</body>
+</html>

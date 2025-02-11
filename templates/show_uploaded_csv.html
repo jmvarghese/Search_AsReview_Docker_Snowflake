@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+	<meta charset="UTF-8">
+	<meta name="viewport" content="width=device-width, initial-scale=1.0">
+	<title>Uploaded Results</title>
+	<link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
+</head>
+<body>
+	<h1>Uploaded Results</h1>
+
+	<!-- Add selection buttons at the top -->
+	<form id="article-form" method="POST" action="{{ url_for('generate_pdf_route') }}">
+		<input type="hidden" name="query" value="{{ query }}">
+		<label for="num_articles">Number of articles to include in PDF:</label>
+		<input type="number" id="num_articles" name="num_articles" min="1" max="{{ articles|length }}" value="10">
+		<button type="submit" id="generate-pdf-btn">Generate PDF</button>
+	</form>
+
+	<table>
+		<thead>
+			<tr>
+				<th>Title</th>
+				<th>Authors</th>
+				<th>Journal</th>
+				<th>Publication Date</th>
+			</tr>
+		</thead>
+		<tbody>
+			{% for article in articles %}
+			<tr>
+				<td>{{ article.title }}</td>
+				<td>{{ article.authors }}</td>
+				<td>{{ article.journal }}</td>
+				<td>{{ article.pub_date }}</td>
+			</tr>
+			{% endfor %}
+		</tbody>
+	</table>
+</body>
+</html>
