@@ -1,0 +1,91 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+	<meta charset="UTF-8">
+	<meta name="viewport" content="width=device-width, initial-scale=1.0">
+	<title>Search Results</title>
+	<link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
+	<script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+</head>
+<body>
+	<h1>Search Results for "{{ query }}"</h1>
+	<p>Found {{ count }} articles</p>
+
+	<h2>Upload Ovid XML Files</h2>
+	<form id="ovid-form" method="post" action="{{ url_for('upload_ovid_xml') }}" enctype="multipart/form-data">
+		<label for="ovid_files">Choose XML files:</label>
+		<input type="file" id="ovid_files" name="ovid_files" accept=".xml" multiple required>
+		<button type="submit">Upload Ovid Data</button>
+	</form>
+
+	<h2>Upload ASReview Results</h2>
+	<form method="post" action="{{ url_for('upload_asreview_csv') }}" enctype="multipart/form-data">
+		<label for="file">Choose CSV file:</label>
+		<input type="file" id="file" name="file" accept=".csv" required>
+		<button type="submit">Upload</button>
+	</form>
+
+	<h2>Start Review Process in ASReview</h2>
+	<form id="asreview-form" method="post" action="{{ url_for('start_asreview') }}">
+		<button type="submit">Start Review Process in ASReview</button>
+	</form>
+
+	<table>
+		<thead>
+			<tr>
+				<th>Title</th>
+				<th>Authors</th>
+				<th>Journal</th>
+				<th>Publication Date</th>
+				<th>PMID</th>
+			</tr>
+		</thead>
+		<tbody id="article-table-body">
+			{% for article in articles %}
+			<tr>
+				<td>{{ article.title }}</td>
+				<td>{{ article.authors }}</td>
+				<td>{{ article.journal }}</td>
+				<td>{{ article.pub_date }}</td>
+				<td>{{ article.pmid }}</td>
+			</tr>
+			{% endfor %}
+		</tbody>
+	</table>
+
+	<script>
+		$(document).ready(function() {
+			$('#ovid-form').on('submit', function(event) {
+				event.preventDefault();
+				var formData = new FormData(this);
+
+				$.ajax({
+					url: $(this).attr('action'),
+					type: 'POST',
+					data: formData,
+					processData: false,
+					contentType: false,
+					success: function(response) {
+						var blob = new Blob([response], { type: 'text/csv' });
+						var url = window.URL.createObjectURL(blob);
+						var a = document.createElement('a');
+						a.href = url;
+						a.download = 'combined_data.csv';
+						document.body.appendChild(a);
+						a.click();
+						document.body.removeChild(a);
+					},
+					error: function(xhr, status, error) {
+						console.error('Error:', error);
+					}
+				});
+			});
+
+			// Automatically trigger the file download
+			if ("{{ file_url }}") {
+				window.location.href = "{{ file_url }}";
+			}
+		});
+	</script>
+</body>
+</html>

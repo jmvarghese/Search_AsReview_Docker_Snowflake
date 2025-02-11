@@ -1,0 +1,186 @@
+% This file contains the code necessary to create and manage the tool in Snowpark COntainer Services. The code can be copied into a snowflake worksheet for implementation.
+
+-- 0. Use ACCOUNTADMIN and set up the database with the required privileges
+USE ROLE ACCOUNTADMIN;
+
+-- Create the database if it doesn't exist
+CREATE DATABASE IF NOT EXISTS scs_db;
+
+-- Grant usage and (optionally) transfer ownership to scs_role.
+GRANT USAGE ON DATABASE scs_db TO ROLE scs_role;
+GRANT USAGE ON DATABASE scs_db TO ROLE ACCOUNTADMIN;
+GRANT OWNERSHIP ON DATABASE scs_db TO ROLE scs_role COPY CURRENT GRANTS;
+
+-- Set the current database for the session.
+USE DATABASE scs_db;
+
+------------------------------------------------------------
+-- 1. Configure Network Egress for Public Destinations
+------------------------------------------------------------
+
+-- Drop the network rule if it already exists
+DROP NETWORK RULE IF EXISTS allow_all_rule;
+DROP EXTERNAL ACCESS INTEGRATION IF EXISTS joshua_searchapp_apis_access_integration;
+
+-- Create a network rule to allow egress on ports 443 (HTTPS) and 80 (HTTP)
+CREATE NETWORK RULE allow_all_rule
+  TYPE = 'HOST_PORT'
+  MODE = 'EGRESS'
+  VALUE_LIST = ('0.0.0.0:443', '0.0.0.0:80');
+
+-- Create an external access integration that uses the above network rule
+CREATE EXTERNAL ACCESS INTEGRATION joshua_searchapp_apis_access_integration
+  ALLOWED_NETWORK_RULES = (allow_all_rule)
+  ENABLED = TRUE;
+
+GRANT USAGE ON INTEGRATION joshua_searchapp_apis_access_integration TO ROLE scs_role;
+GRANT USAGE ON NETWORK RULE allow_all_rule TO ROLE scs_role;
+
+------------------------------------------------------------
+-- 2. Set Up Roles, Warehouses, and Compute Pools
+------------------------------------------------------------
+
+-- Create a warehouse for the service
+CREATE OR REPLACE WAREHOUSE scs_warehouse WITH 
+  WAREHOUSE_SIZE = 'X-SMALL'
+  AUTO_SUSPEND = 300
+  AUTO_RESUME = TRUE;
+GRANT USAGE ON WAREHOUSE scs_warehouse TO ROLE scs_role;
+
+-- Grant permissions for the service to bind to public endpoints
+GRANT BIND SERVICE ENDPOINT ON ACCOUNT TO ROLE scs_role;
+
+-- Create the compute pool with a small instance family allocation
+CREATE COMPUTE POOL IF NOT EXISTS scs_compute_pool
+	MIN_NODES = 1
+	MAX_NODES = 1
+	AUTO_SUSPEND_SECS = 60
+	INSTANCE_FAMILY = CPU_X64_XS;
+GRANT USAGE, MONITOR ON COMPUTE POOL scs_compute_pool TO ROLE scs_role;
+
+-- Assign the custom role to the user
+GRANT ROLE scs_role TO USER JOSHUAV;
+
+-- Switch to the custom role and set context
+USE ROLE scs_role;
+USE DATABASE scs_db;
+USE WAREHOUSE scs_warehouse;
+
+------------------------------------------------------------
+-- 3. Set Up Schema, Image Repository, and Optional Stage
+------------------------------------------------------------
+
+-- Create the schema and image repository for containerized services
+CREATE SCHEMA IF NOT EXISTS data_schema;
+USE SCHEMA data_schema;
+CREATE IMAGE REPOSITORY IF NOT EXISTS scs_repository;
+
+-- Optional: Create a stage for file storage
+CREATE OR REPLACE STAGE scs_stage
+  DIRECTORY = (ENABLE = TRUE);
+
+-- Verify repository and stage setup
+SHOW IMAGE REPOSITORIES;
+LIST @scs_stage;
+
+-- Ensure the compute pool is active
+DESCRIBE COMPUTE POOL scs_compute_pool;
+
+------------------------------------------------------------
+-- 4. Deploy the Containerized Service
+------------------------------------------------------------
+
+-- Drop any existing service before recreating (to prevent conflicts)
+DROP SERVICE IF EXISTS josh_search_app;
+
+-- (Optional) Suspend and resume the service if needed to apply changes
+ALTER SERVICE josh_search_app SUSPEND;
+ALTER SERVICE josh_search_app RESUME;
+
+-- Deploy the containerized service and include the external access integration parameter
+CREATE SERVICE josh_search_app
+   IN COMPUTE POOL scs_compute_pool
+   EXTERNAL_ACCESS_INTEGRATIONS = (joshua_searchapp_apis_access_integration)
+   FROM SPECIFICATION $$
+   spec:
+	 containers:
+	   - name: search-app
+		 image: pfe-ie05914.registry.snowflakecomputing.com/scs_db/data_schema/scs_repository/search_app:latest
+		 readinessProbe:
+		   port: 5002
+		   path: /
+		 resources:
+		   limits:
+			 cpu: 0.2
+	   - name: my-asreview-image
+		 image: pfe-ie05914.registry.snowflakecomputing.com/scs_db/data_schema/scs_repository/my-asreview-image:latest
+		 readinessProbe:
+		   port: 5001
+		   path: /
+		 resources:
+		   limits:
+			 cpu: 0.2
+	   - name: nginx
+		 image: pfe-ie05914.registry.snowflakecomputing.com/scs_db/data_schema/scs_repository/nginx:latest
+		 readinessProbe:
+		   port: 80
+		 resources:
+		   limits:
+			 cpu: 0.2
+	 endpoints:
+	   - name: searchappendpoint
+		 port: 5002
+		 public: true
+	   - name: asreviewendpoint
+		 port: 5001
+		 public: true
+	   - name: nginxendpoint
+		 port: 80
+		 public: false
+   $$;
+
+-- Monitor service creation
+DESCRIBE SERVICE josh_search_app;
+SELECT SYSTEM$GET_SERVICE_STATUS('josh_search_app');
+
+-- Fetch logs for debugging if needed
+SELECT SYSTEM$GET_SERVICE_LOGS('josh_search_app', '0', 'search-app', 20);
+SELECT SYSTEM$GET_SERVICE_LOGS('josh_search_app', '0', 'my-asreview-image', 20);
+SELECT SYSTEM$GET_SERVICE_LOGS('josh_search_app', '0', 'nginx', 20);
+
+-- Verify endpoints and availability
+SHOW ENDPOINTS IN SERVICE josh_search_app; 
+
+------------------------------------------------------------
+-- 5. Additional Debugging and Security Configuration
+------------------------------------------------------------
+SHOW WAREHOUSES;
+SHOW SERVICES;
+SHOW COMPUTE POOLS;
+SHOW IMAGE REPOSITORIES;
+SHOW STAGES;
+SHOW IMAGES IN IMAGE REPOSITORY SCS_DB.DATA_SCHEMA.SCS_REPOSITORY;
+
+-- Switch to SECURITYADMIN for user and role management
+USE ROLE SECURITYADMIN;
+CREATE USER steve PASSWORD='abc123';
+CREATE ROLE asreview_user_role;
+GRANT ROLE asreview_user_role TO USER steve;
+GRANT ROLE asreview_user_role TO USER JoshuaV;
+
+-- Switch back to scs_role and grant additional permissions
+USE ROLE scs_role;
+GRANT USAGE ON DATABASE scs_db TO ROLE asreview_user_role;
+GRANT USAGE ON SCHEMA data_schema TO ROLE asreview_user_role;
+GRANT SERVICE ROLE josh_search_app!ALL_ENDPOINTS_USAGE TO ROLE asreview_user_role;
+
+SELECT 
+	QUERY_ID,
+	WAREHOUSE_NAME,
+	EXECUTION_STATUS,
+	TOTAL_ELAPSED_TIME,
+	CREDITS_USED
+FROM SNOWFLAKE.ACCOUNT_USAGE.QUERY_HISTORY
+WHERE WAREHOUSE_NAME = 'SCS_WAREHOUSE'
+ORDER BY START_TIME DESC
+LIMIT 10;
